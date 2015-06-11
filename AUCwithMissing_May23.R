@@ -7,11 +7,26 @@
 # CI summary function: extract repeating part into functions(0.3)
 # Coverage probability function: extract repeating part into functions(0.4)
 # added exponential samples(2.1) => but something strange...
+## May 21
+# (1.1) typo - parameter of exp dist: c.x,y ... beta.x,y -> 1/beta.x.y
+# (2.1) n.sim = 1000: for efficiency set n.sim=1000 instead of 10,000 until we finalize the code.
+# (0.1) added package "knitr", "markdown"
+## May 23
+# (0.4.1) added labels on tables of coverage prob. function
+# (0.4.2~3) added L/R NCP, ZWI function
+
+
 
 ## to do's : 
-#1. check the algorithm of exponential samples(2.1)
-#2. Other evaluation tools(under 0.4) : distance(th, th.hat), CI length, LNCP/RNCP, ZWI (as in Chapter 5 of draft paper)
 #3. Other CI methods: NC1, NC2, CM, RG (as in Chapter 3.4 ~ 3.7)
+
+### cleared
+#1. check the algorithm of exponential samples(2.1) -> corrected: May 21, 1.1 parm: reciprocal scale parameter was applied.
+#2. Other evaluation tools(under 0.4) : distance(th, th.hat), CI length, LNCP/RNCP, ZWI (as in Chapter 5 of draft paper)
+
+
+
+
 
 ## 0. library  ########################################################################################
 # 0.1 packages
@@ -35,10 +50,7 @@ rbivariate <- function(mu.x, sd.x, mu.y, sd.y, r=0.5, iter=100) {
 qtexp <- function(x, beta, trunc) { -log(1-x*(1-exp(-trunc/beta)))*beta }
 rtexp <- function(n, beta, trunc) { qtexp(runif(n), beta, trunc) }
 
-
-
 # 0.2.3 Q.stat : Q1 and Q2
-#For Hanley-McNeil-Wald
 # log: Error corrected on May 6: Q1 & Q2 switched
 Q.stat <- function(data, n.x, n.y, disease="disease", marker="marker") {
   x = "$"(data, marker)["$"(data, disease)==0]
@@ -72,7 +84,7 @@ WS <- function(theta.hat, alpha = 0.05, n.x, n.y) {
 AUC.CI <- function(data, n.x, n.y, disease="disease", marker="marker", alpha) {
   z.a2 = qnorm(1-alpha/2)
   AUC.hat = (prediction(data[,marker], data[,disease]) %>% performance("auc"))@y.values[[1]]  # package ROCR
-  Q1 = Q.stat(data,n.x,n.y)$Q1 ; Q2 = Q.stat(data,n.x,n.y)$Q2                   # function Q.stat HMW 
+  Q1 = Q.stat(data,n.x,n.y)$Q1 ; Q2 = Q.stat(data,n.x,n.y)$Q2                   # function Q.stat
   V.HMW = V(AUC.hat, n.x, n.y, Q1, Q2)                                          # function V
   V.HM = V(AUC.hat, n.x, n.y)           # Q1, Q2 as default
   CI.WS <- matrix(NA,2,3); for (z in 1:3) (CI.WS[,z] = WS(AUC.hat, alpha[z], n.x, n.y))
@@ -83,26 +95,78 @@ AUC.CI <- function(data, n.x, n.y, disease="disease", marker="marker", alpha) {
 }
 
 # 0.4 evaluation function  #################################################################################
-# 0.4.1 Coverage probability 
+# 0.4.1 CP(Coverage probability)
 coverage <- function(data, dim = c(5,9,3), CI.type=c("HMW", "HM", "WS")) {
   # data: list of inferences(AUC hat, CI's lower/upper bounds)
   coverage <- array(,c(dim,length(CI.type)))
+  dimnames(coverage) <- list(
+    paste0("AUC = ",c(0.6, 0.7, 0.8, 0.9, 0.95)), 
+    paste0(rep(c(30,50,200),each=3), "*", rep(c(0.3,0.5,0.7))),
+    paste0("alpha = ",c("10%","5%","1%")),
+    paste0("method = ",c("HMW", "HM", "WS")) )
   for (z in 1:length(CI.type)) {
     CI.lb = paste0(CI.type[z],".lb") ; CI.ub = paste0(CI.type[z],".ub")
     for (i in 1:dim[1]) {        # AUC (0.6 ~ 0.95)
       for (j in 1:dim[2]){       # n*pi (30,50,200) * (0.3, 0.5, 0.7)
         for (k in 1:dim[3]){     # alpha 10%, 5%, 1%
           coverage[i,j,k, z] <- mean(sapply(data[[i]][[j]],function(x) {
-            # x$HMW.lb[k] <= x$AUC & x$HMW.ub[k] >= x$AUC }))       # replace this!!!
-            
-            x[k,CI.lb] <= x$AUC & x[k, CI.ub] >= x$AUC }), na.rm=T)       # with this..
+            x[k,CI.lb] <= x$AUC & x[k, CI.ub] >= x$AUC }), na.rm=T)
         }
       }
     }
   }
-  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = HMW, HM, WS")
+  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = HMW, HM, WS \n\n ")
   return(coverage)
 }
+
+# 0.4.2 LRNCP(LNCP: left noncoverage prob, RNCP: right noncoverage prob)
+LRNCP <- function(data, dim = c(5,9,3), CI.type=c("HMW", "HM", "WS")) {
+  coverage <- array(,c(dim,length(CI.type)))
+  dimnames(coverage) <- list(
+    paste0("AUC = ",c(0.6, 0.7, 0.8, 0.9, 0.95)), 
+    paste0(rep(c(30,50,200),each=3), "*", rep(c(0.3,0.5,0.7))),
+    paste0("alpha = ",c("10%","5%","1%")),
+    paste0("method = ",c("HMW", "HM", "WS")) )
+  for (z in 1:length(CI.type)) {
+    CI.lb = paste0(CI.type[z],".lb") ; CI.ub = paste0(CI.type[z],".ub")
+    for (i in 1:dim[1]) {        # AUC (0.6 ~ 0.95)
+      for (j in 1:dim[2]){       # n*pi (30,50,200) * (0.3, 0.5, 0.7)
+        for (k in 1:dim[3]){     # alpha 10%, 5%, 1%
+          LNCP <- mean(sapply(data[[i]][[j]],function(x) {x[k,CI.lb] > x$AUC }), na.rm=T) %>% round(4) %>% format(nsmall=4)
+          RNCP <- mean(sapply(data[[i]][[j]],function(x) {x[k,CI.ub] < x$AUC }), na.rm=T) %>% round(4) %>% format(nsmall=4)
+          coverage[i,j,k, z] <- paste0(sub("^(-?)0.", "\\1.",LNCP),"+",sub("^(-?)0.", "\\1.",RNCP))
+        }
+      }
+    }
+  }
+  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = HMW, HM, WS \n\n ")
+  return(coverage)
+}
+
+
+# 0.4.3 ZWI rate(rate of occurence of zero width intervals)
+ZWI <- function(data, dim = c(5,9,3), CI.type=c("HMW", "HM", "WS")) {
+  zwi <- array(,c(dim,length(CI.type)))
+  dimnames(zwi) <- list(
+    paste0("AUC = ",c(0.6, 0.7, 0.8, 0.9, 0.95)), 
+    paste0(rep(c(30,50,200),each=3), "*", rep(c(0.3,0.5,0.7))),
+    paste0("alpha = ",c("10%","5%","1%")),
+    paste0("method = ",c("HMW", "HM", "WS")) )
+  for (z in 1:length(CI.type)) {
+    CI.lb = paste0(CI.type[z],".lb") ; CI.ub = paste0(CI.type[z],".ub")
+    for (i in 1:dim[1]) {        # AUC (0.6 ~ 0.95)
+      for (j in 1:dim[2]){       # n*pi (30,50,200) * (0.3, 0.5, 0.7)
+        for (k in 1:dim[3]){     # alpha 10%, 5%, 1%
+          zwi[i,j,k, z] <- mean(sapply(data[[i]][[j]],function(x) {x[k,CI.lb] == x[k,CI.ub] }), na.rm=T) %>% round(5) %>% format(nsmall=5)
+        }
+      }
+    }
+  }
+  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = HMW, HM, WS \n\n ")
+  return(zwi)
+}
+
+
 
 
 
@@ -123,7 +187,7 @@ parm1 <- within(parm1,
   # bounds for trunction
   a.x <- mu.x - 3* sig.x; b.x <- mu.x + 3*sig.x   # bounds for truncated noraml
   a.y <- mu.y - 3* sig.y; b.y <- mu.y + 3*sig.y
-  c.x <- qexp(0.99, beta.x); c.y <- qexp(0.99, beta.y) # bounds for truncated exp
+  c.x <- qexp(0.99, 1/beta.x); c.y <- qexp(0.99, 1/beta.y) # bounds for truncated exp  # correction: beta. -> 1/beta. (scale parameter)
 })
 
 ## 1.2 parms2: n, pi
@@ -135,6 +199,9 @@ parm2 <- data.frame(n = rep(c(30, 50, 200), each=3), pi = rep(c(0.30, 0.50, 0.70
 ## 1.3 alpha levels
 alpha <- c(0.1, 0.05, 0.01)
 z.a2<- qnorm(1-alpha/2)     # z_alpha/2
+
+
+
 
 
 
@@ -157,7 +224,7 @@ temp.1.exp <- temp.1.exp.stat <- list()         # inner shells
       c.x <- parm1$c.x[i]; c.y <- parm1$c.y[i]
       n <- parm2$n[j] ; pi <- parm2$pi[j]
       n.y <- n*pi; n.x <- n - n.y
-      for (k in 1:10000){ # k: num of simulations(samples)
+      for (k in 1:1000){ # k: num of simulations(samples)
         # normal
         temp.1[[k]] <- temp <- data.frame(disease = c(rep(0,n.x), rep(1, n.y)),
                                           marker  = c(rtruncnorm(n-n*pi,a.x, b.x, mu.x, sig.x), rtruncnorm(n*pi,a.y, b.y, mu.y, sig.y)))
@@ -181,8 +248,20 @@ temp.1.exp <- temp.1.exp.stat <- list()         # inner shells
   }
 }
 
+rm(temp.2, temp.2.stat, temp.1, temp.1.stat, temp.2.exp, temp.2.exp.stat, temp.1.exp, temp.1.exp.stat) #clearing temporary data
+
 ## 3. Evaluation  ########################################################################################
 #3.1 Coverage probability
-
 print(coverage.normal <- coverage(sample.normal.stat))
 print(coverage.exp <- coverage(sample.exp.stat))
+
+#3.2 Left/Right Non Coverage Probability
+print(LRNCP.normal <- LRNCP(sample.normal.stat))
+print(LRNCP.exp <- LRNCP(sample.exp.stat))
+
+#3.3 Rate of occurrence of Zero Width Intervals
+print(ZWI.normal <- ZWI(sample.normal.stat))
+print(ZWI.exp <- ZWI(sample.exp.stat))
+
+
+
