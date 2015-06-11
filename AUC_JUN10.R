@@ -23,6 +23,8 @@
 # (0.2.12) added Wilson (with and without continuity-correction)
 # (0.2.13) added Halperine Mee
 # (0.2.14) added Double Beta
+## June 11
+# (0.2.9) RG. corrected z.a2 with z.a
 
 
 ## 0. library  ########################################################################################
@@ -119,9 +121,9 @@ V.CM <- function(AUC, n.x, n.y){
 }
 
 
-# 0.2.9 Reiser-Guttman
+# 0.2.9 Reiser-Guttman    (corrected: z.a2 -> z.a)
 RG <- function(data, n.x=sum(data[,disease]==0), n.y=sum(data[,disease]==1), disease="disease", marker="marker", alpha){
-  z.a2 = qnorm(1-alpha/2)
+  z.a = qnorm(1-alpha)
   mu.x = mean(data[data[,disease]==0,marker])
   mu.y = mean(data[data[,disease]==1,marker])
   sig.x = sd(data[data[,disease]==0,marker])
@@ -130,8 +132,8 @@ RG <- function(data, n.x=sum(data[,disease]==0), n.y=sum(data[,disease]==1), dis
   d = (mu.y-mu.x)/sqrt(s2)
   f = s2^2/((sig.x^4/(n.x-1))+(sig.y^4/(n.y-1)))
   M = s2/((sig.x^2/n.x)+(sig.y^2/n.y))
-  delta1 = d - z.a2*sqrt((1/M)+(d^2/(2*f)))
-  delta2 = d + z.a2*sqrt((1/M)+(d^2/(2*f)))
+  delta1 = d - z.a*sqrt((1/M)+(d^2/(2*f)))
+  delta2 = d + z.a*sqrt((1/M)+(d^2/(2*f)))
   return(data.frame(lb=pnorm(delta1), ub=pnorm(delta2)))
 }
 
