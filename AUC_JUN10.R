@@ -23,8 +23,9 @@
 # (0.2.12) added Wilson (with and without continuity-correction)
 # (0.2.13) added Halperine Mee
 # (0.2.14) added Double Beta
-## June 11
+## June 16
 # (0.2.9) RG. corrected z.a2 with z.a
+# (0.2.15) added Double Gaussian
 
 
 ## 0. library  ########################################################################################
@@ -34,6 +35,7 @@ library(ROCR)
 library(dplyr)
 library(truncnorm)  # for 2.1 sampling
 library(rootSolve)  # for Newton-Raphson Method (0.2.4)
+library(sn)         # for Owen's T-function in Double Gaussian Method (0.2.15)
 
 # 0.2 functions
 # 0.2.1 rbivariate
@@ -257,9 +259,29 @@ DB <- function(theta.hat, n.x, n.y, alpha) {
 }
 
 
+# 0.2.15 Double Gaussian
+
+V.DG <- function(delta, n.x, n.y) {
+  theta = pnorm(delta/sqrt(2))
+  Owen = T.Owen(delta/sqrt(2), 1/sqrt(3))
+  return(V = ((n.x + n.y - 1)*theta*(1-theta) - 2*(n.x + n.y -2) * Owen ) /n.x / n.y)
+}
+
+DG.equation <- function(delta, theta.hat, n.x, n.y, alpha) {
+  AUC = pnorm(delta/sqrt(2))
+  return(AUC + c(+1,-1)*qnorm(1-alpha/2) * sqrt(V.DG(delta, n.x, n.y)) - theta.hat)
+}
+
+DG <- function(theta.hat, n.x, n.y, alpha) {
+  start.1 = 1; start.2 = 3
+  delta <- multiroot(DG.equation, c(start.1, start.2), theta.hat=theta.hat, n.x=n.x, n.y=n.y, alpha=alpha)$root
+  return(pnorm(delta/sqrt(2)))
+}
+
+
 
 # 0.3 CI summary function  #################################################################################
-CI.method=c("HMW", "HM", "WS", "NC1", "NC2", "CM", "RG", "CP", "Bm", "WS2", "WS3", "Mee", "DB")
+CI.method=c("HMW", "HM", "WS", "NC1", "NC2", "CM", "RG", "CP", "Bm", "WS2", "WS3", "Mee", "DB", "DG")
 
 AUC.CI <- function(data, n.x=sum(data[,disease]==0), n.y=sum(data[,disease]==1), disease="disease", marker="marker", alpha) {
   z.a2 = qnorm(1-alpha/2)
@@ -296,6 +318,8 @@ AUC.CI <- function(data, n.x=sum(data[,disease]==0), n.y=sum(data[,disease]==1),
   
   CI.DB = data.frame(lb=rep(NA,3), ub=rep(NA,3)); for (z in 1:3) (CI.DB[z,] = DB(AUC.hat, n.x, n.y, alpha=alpha[z]))
   
+  CI.DG = data.frame(lb=rep(NA,3), ub=rep(NA,3)); for (z in 1:3) (CI.DG[z,] = DG(AUC.hat, n.x, n.y, alpha=alpha[z]))
+  
   return(data.frame(AUC.hat=AUC.hat, n.x = n.x, n.y = n.y, Q1 = Q1 , Q2 = Q2 ,
                     HMW.lb = CI.HMW$lb,  HMW.ub = CI.HMW$ub,
                     HM.lb  = CI.HM$lb,   HM.ub = CI.HM$ub,
@@ -309,7 +333,8 @@ AUC.CI <- function(data, n.x=sum(data[,disease]==0), n.y=sum(data[,disease]==1),
                     WS2.lb = CI.WS2$lb,  WS2.ub = CI.WS2$ub,
                     WS3.lb = CI.WS3$lb,  WS3.ub = CI.WS3$ub,
                     Mee.lb = CI.Mee$lb,  Mee.ub = CI.Mee$ub,
-                    DB.lb  = CI.DB$lb,   DB.ub = CI.DB$ub
+                    DB.lb  = CI.DB$lb,   DB.ub = CI.DB$ub,
+                    DG.lb  = CI.DG$lb,   DG.ub = CI.DG$ub
   ))
 }
 
