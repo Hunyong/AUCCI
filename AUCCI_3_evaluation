@@ -1,0 +1,110 @@
+### AUCCI Part III. Evaluating CI performance
+
+library(dplyr)  # for LRNCP & ZWI
+
+# 1 CP(Coverage probability)
+coverage <- function(data, parm) {
+  # data: list of inferences(AUC hat, CI's lower/upper bounds)
+  # parm: list of parameters(AUC, n*pi, alpha, n.sim, CI.methods)
+  coverage <- array(,parm$dim[c("theta","npi","alpha","method")])
+  dimnames(coverage) <- list(
+    paste0("AUC = ", parm$theta$theta), 
+    paste0(parm$npi$n, "*", parm$npi$pi),
+    paste0("alpha = ", parm$alpha$alpha),
+    paste0("method = ",parm$method$CI.methods, " (data= ", deparse(substitute(data)), ", Eval= Coverage Prob')"))
+  for (z in 1:parm$dim["method"]) {
+    for (i in 1:parm$dim["theta"]) {        # AUC (0.6 ~ 0.95)
+      for (j in 1:parm$dim["npi"]){       # n*pi (30,50,200) * (0.3, 0.5, 0.7)
+        for (p in 1:parm$dim["alpha"]){     # alpha 10%, 5%, 1%
+          coverage[i, j, p, z] <- mean(sapply(data[[i]][[j]][[p]], function(x) {
+            x[1,z] <= x[1,"AUC"] & x[2,z] >= x[2,"AUC"] }), na.rm=T)
+        }
+      }
+    }
+  }
+  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = ", parm$method$CI.methods,  " \n\n ")
+  return(coverage)
+}
+
+# 2 LRNCP(LNCP: left noncoverage prob, RNCP: right noncoverage prob)
+LRNCP <- function(data, parm) {
+  # data: list of inferences(AUC hat, CI's lower/upper bounds)
+  # parm: list of parameters(AUC, n*pi, alpha, n.sim, CI.methods)
+  coverage <- array(,parm$dim[c("theta","npi","alpha","method")])
+  dimnames(coverage) <- list(
+    paste0("AUC = ", parm$theta$theta), 
+    paste0(parm$npi$n, "*", parm$npi$pi),
+    paste0("alpha = ", parm$alpha$alpha),
+    paste0("method = ",parm$method$CI.methods, " (data= ", deparse(substitute(data)), ", Eval= Left/Right Non Coverage Prob')"))
+  for (z in 1:parm$dim["method"]) {
+    for (i in 1:parm$dim["theta"]) {        # AUC (0.6 ~ 0.95)
+      for (j in 1:parm$dim["npi"]){       # n*pi (30,50,200) * (0.3, 0.5, 0.7)
+        for (p in 1:parm$dim["alpha"]){     # alpha 10%, 5%, 1%
+          LNCP <- mean(sapply(data[[i]][[j]][[p]],function(x) {x[1, z] > x[1,"AUC"] }), na.rm=T) %>% round(4) %>% format(nsmall=4)
+          RNCP <- mean(sapply(data[[i]][[j]][[p]],function(x) {x[2, z] < x[1,"AUC"] }), na.rm=T) %>% round(4) %>% format(nsmall=4)
+          coverage[i, j, p, z] <- paste0(sub("^(-?)0.", "\\1.",LNCP),"+",sub("^(-?)0.", "\\1.",RNCP))
+        }
+      }
+    }
+  }
+  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = ", parm$method$CI.methods,  " \n\n ")
+  return(coverage)
+}
+
+# 3 ZWI rate(rate of occurence of zero width intervals)
+ZWI <- function(data, parm) {
+  # data: list of inferences(AUC hat, CI's lower/upper bounds)
+  # parm: list of parameters(AUC, n*pi, alpha, n.sim, CI.methods)
+  zwi <- array(,parm$dim[c("theta","npi","alpha","method")])
+  dimnames(zwi) <- list(
+    paste0("AUC = ", parm$theta$theta), 
+    paste0(parm$npi$n, "*", parm$npi$pi),
+    paste0("alpha = ", parm$alpha$alpha),
+    paste0("method = ",parm$method$CI.methods, " (data= ", deparse(substitute(data)), ", Eval= Zero-Width Interval)"))
+  for (z in 1:parm$dim["method"]) {
+    for (i in 1:parm$dim["theta"]) {        # AUC (0.6 ~ 0.95)
+      for (j in 1:parm$dim["npi"]){       # n*pi (30,50,200) * (0.3, 0.5, 0.7)
+        for (p in 1:parm$dim["alpha"]){     # alpha 10%, 5%, 1%
+          zwi[i, j, p, z] <- mean(sapply(data[[i]][[j]][[p]],function(x) {x[1, z] == x[2, z]}), na.rm=T) %>% round(5) %>% format(nsmall=5)
+        }
+      }
+    }
+  }
+  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = ", parm$method$CI.methods,  " \n\n ")
+  return(zwi)
+}
+
+
+# 4 CIL(Confidence Interval Length)
+CIL <- function(data,parm){
+  # data: list of inferences(AUC hat, CI's lower/upper bounds)
+  # parm: list of parameters(AUC, n*pi, alpha, n.sim, CI.methods)
+  cil <- array(,parm$dim[c("theta","npi","alpha","method")])
+  dimnames(cil) <- list(
+    paste0("AUC = ", parm$theta$theta), 
+    paste0(parm$npi$n, "*", parm$npi$pi),
+    paste0("alpha = ", parm$alpha$alpha),
+    paste0("method = ",parm$method$CI.methods, " (data= ", deparse(substitute(data)), ", Eval= Confidence Interval Length)"))
+  for (z in 1:parm$dim["method"]) {
+    for (i in 1:parm$dim["theta"]) {        # AUC (0.6 ~ 0.95)
+      for (j in 1:parm$dim["npi"]){         # n*pi (30,50,200) * (0.3, 0.5, 0.7)
+        for (p in 1:parm$dim["alpha"]){     # alpha 10%, 5%, 1%
+          cil[i, j, p, z] <- mean(sapply(data[[i]][[j]][[p]],function(x) {x[2, z] - x[1, z]}), na.rm=T) %>% round(5) %>% format(nsmall=5)
+        }
+      }
+    }
+  }
+  cat(" row: AUC = 0.6 ~ 0.95 \n col: n*pi = (30,50,200)*(.3,.5,.7) \n 3rd: alpha = .1, .05, .01 \n 4th: CI methods = ", parm$method$CI.methods,  " \n\n ")
+  return(cil)
+}
+
+
+coverage.normal       <- coverage(stat.normal, parm)
+coverage.exponential  <- coverage(stat.exponential, parm)
+LRNCP.normal          <- LRNCP(stat.normal, parm)
+LRNCP.exponential     <- LRNCP(stat.exponential, parm)
+ZWI.normal            <- ZWI(stat.normal, parm)
+ZWI.exponential       <- ZWI(stat.exponential, parm)
+CIL.normal            <- CIL(stat.normal, parm)
+CIL.exponential       <- CIL(stat.exponential, parm)
+
