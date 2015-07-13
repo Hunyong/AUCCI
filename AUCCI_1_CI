@@ -1,0 +1,264 @@
+### AUCCI Part I. CI functions
+
+library(rootSolve)  # for Newton-Raphson Method (0.2.4)
+library(sn)         # for Owen's T-function in Double Gaussian Method (0.2.15)
+
+# CI methods :    ref to 1.CI test(temp), 2.simulation, 3.evaluation
+CI.methods = c("HanleyMcNeilWald", "HanleyMcNeilExponential", "HanleyMcNeilScore", 
+               "NewcombeExponential", "NewcombeScore", "CortesMohri", "ReiserGuttman", 
+               "ClopperPearson", "Bamber", "WilsonScore",
+               "HalperinMee", "DoubleBeta", "DoubleGaussian",
+               "MannWhitney", "MannWhitneyLT", "DeLong")
+
+## internal functions...
+CI.base <- function(mu.hat, Var, alpha) {
+  return(mu.hat + c(-1,1) * qnorm(1-alpha/2)*sqrt(Var))
+}
+AUC <- function(x, y, n.x=length(x), n.y=length(y)) {
+  A <- 0; for (i in 1:n.x) { A = A + ( sum(y > x[i]) + sum(y==x[i])/2 ) }
+  return(A = A/(n.x * n.y))
+}
+# Q.stat for HM and its derivatives
+Q.stat <- function(x, y, n.x=length(x), n.y=length(y)) {
+  Q2 <- Q1 <- 0
+  for (i in 1:n.x) {Q1 = Q1 + ( sum(y > x[i]) + sum(y==x[i])/2 )^2}; Q1 = Q1 /(n.x * n.y^2)
+  for (j in 1:n.y) {Q2 = Q2 + ( sum(y[j] > x) + sum(y[j]==x)/2 )^2}; Q2 = Q2 /(n.x^2 * n.y)
+  return(data.frame(Q1 = Q1, Q2 = Q2))
+}
+V.HM <- function(AUC, n.x, n.y, Q1 = AUC/(2-AUC), Q2=2* AUC^2 /(AUC + 1)) {
+  # default: HME method
+  return((AUC * (1-AUC) + (n.y -1)*(Q1 - AUC^2) + (n.x-1)*(Q2 - AUC^2))/(n.x*n.y) )
+}
+HMS.equation = function(AUC, AUC.hat, n.x, n.y, alpha) {
+  AUC + c(+1,-1)*qnorm(1-alpha/2) * sqrt(V.HM(AUC, n.x, n.y)) - AUC.hat
+}
+V.NC <- function(AUC, n.x, n.y) {
+  N = (n.x+n.y)/2
+  return( AUC*(1-AUC)/(n.x*n.y) * ( (2*N-1) - (3*N-3) / ((2-AUC)*(AUC+1)) ) )
+}
+NC.equation <- function(AUC, AUC.hat, n.x, n.y, alpha) {
+  AUC + c(+1,-1)*qnorm(1-alpha/2) * sqrt(V.NC(AUC, n.x, n.y)) - AUC.hat   
+}
+V.CM <- function(AUC, n.x, n.y){
+  z1 = function (w, n.x, n.y, k) {1-0.5*(w/n.x+(k-w)/n.y)}
+  z2 = function (w, n.x, n.y, k) 
+    (n.y*w^2+n.x*(k-w)^2+n.y*(n.y+1)*w+n.x*(n.x+1)*(k-w)-2*w*(k-w)*(n.y+n.x+1))/(12*n.y^2*n.x^2)
+  F.base <- function (w, n.x, n.y, k) {choose(n.y-k+2*w,w)*choose(n.x+k-2*w,k-w)}
+  k=round((n.x+n.y)*(1-AUC))
+  F1=F2=F3=F.den=0
+  for (w in 0:k){
+    F1 = F1 + F.base(w, n.x, n.y, k)*z1(w, n.x, n.y, k)^2
+    F.den = F.den + F.base(w, n.x, n.y, k)
+    F2 = F2 + F.base(w, n.x, n.y, k)*z1(w, n.x, n.y, k)
+    F3 = F3 + F.base(w, n.x, n.y, k)*z2(w, n.x, n.y, k)
+  }
+  return(V = (F1/F.den - F2^2/F.den^2 + F3/F.den))
+}
+V.Bm <- function(x, y, n.x=length(x), n.y=length(y), AUC.hat=AUC(x,y,n.x,n.y)){
+  b.yyx <- b.xxy <- p.xy <- 0
+  for (i in 1:n.x) {b.yyx = b.yyx + sum(y < x[i])^2 + sum(x[i] < y)^2 -2*sum(y < x[i])*sum(x[i] < y) }
+  b.yyx = b.yyx/(n.x*n.y^2)
+  for (j in 1:n.y) {b.xxy = b.xxy + sum(x < y[j])^2 + sum(y[j] < x)^2 -2*sum(x < y[j])*sum(y[j] < x) }
+  b.xxy = b.xxy/(n.y*n.x^2)
+  for (i in 1:n.x) {  p.xy = p.xy + sum(y != x[i] ) }
+  p.xy = p.xy /(n.x*n.y)
+  return(1/(4*(n.y-1)*(n.x-1))*(p.xy + (n.y -1)*b.xxy + (n.x -1)*b.yyx - 4*(n.y + n.x -1)*(AUC.hat -0.5)^2))
+}
+# p.stat for Halperin Mee method
+p.stat <- function(x, y, n.x=length(x), n.y=length(y)) {
+  Q = Q.stat(x, y, n.x, n.y); Q1 <- Q$Q1;  Q2 <- Q$Q2
+  y.mat <- matrix(rep(y,n.x),ncol=n.x)
+  x.mat <- t(matrix(rep(x,n.y),nrow=n.x))
+  U.sq <- sum(((y.mat > x.mat)+(y.mat == x.mat)/2)^2)
+  p2 <- (n.x*n.y^2*Q1 - U.sq)/(n.x*n.y*(n.y-1))
+  p1 <- (n.y*n.x^2*Q2 - U.sq)/(n.y*n.x*(n.x-1))
+  return(data.frame(p1=p1,p2=p2))
+}
+Halperin.stat <- function(x, y, n.x=length(x), n.y=length(y)) {
+  ranks = rank(c(x,y))
+  rank.x <- ranks[1:n.x]
+  rank.y <- ranks[-1:-n.x]
+  AUC.hat <- AUC(x, y, n.x, n.y)
+  increment = ifelse(AUC.hat < 0.5, +0.5, -0.5)
+  while (min(AUC.hat,1-AUC.hat)*sqrt(n.x*n.y) < 0.5){
+    rank.y = rank.y + increment
+    x <- rank.x ; y <- rank.y
+    AUC.hat = AUC(x, y, n.x, n.y)
+  }
+  p = p.stat(x, y, n.x, n.y)
+  rho.hat = (p-AUC.hat^2)/(AUC.hat-AUC.hat^2)
+  N.J.hat = n.x*n.y/(((n.x-1)*rho.hat$p1 +1)/(1-1/n.y) + ((n.y-1)*rho.hat$p2 + 1 )/(1-1/n.x) )
+  return(data.frame(p1=p$p1, p2=p$p2, AUC.hat=AUC.hat, N.J.hat=N.J.hat))
+}  
+Halperin.equation <- function(AUC, AUC.hat, N.J.hat, alpha){
+  AUC + c(+1,-1)*qnorm(1-alpha/2) * sqrt(AUC*(1-AUC)/N.J.hat) - AUC.hat
+}
+Halperin <- function(x, y, n.x=length(x), n.y=length(y), alpha) {
+  Halperin.stat = Halperin.stat(x, y, n.x, n.y)
+  AUC.hat = Halperin.stat$AUC.hat
+  N.J.hat = Halperin.stat$N.J.hat
+  multiroot(Halperin.equation, c(0.01, 0.99), AUC.hat=AUC.hat, N.J.hat=N.J.hat, alpha=alpha)$root 
+}
+V.DB <- function(alp, n.x, n.y) {
+  R1 = gamma(alp + 1)^2 / gamma(2*alp + 1)
+  R2 = gamma(2*alp +1)*gamma(alp +1)/gamma(3*alp+1)
+  theta = 1 - R1
+  Q = 1 - 2*R1 + R2
+  V = (theta*(1-theta) + (n.x+n.y-2)*(Q-theta^2))/n.x/n.y
+}
+DB.equation <- function(alp, AUC.hat, n.x, n.y, alpha) {
+  AUC = 1 - gamma(alp + 1)^2 / gamma(2*alp + 1)
+  return(AUC + c(+1,-1)*qnorm(1-alpha/2) * sqrt(V.DB(alp, n.x, n.y)) - AUC.hat)
+}
+DB <- function(AUC.hat, n.x, n.y, alpha) {
+  alp <- multiroot(DB.equation, c(1,3), AUC.hat=AUC.hat, n.x=n.x, n.y=n.y, alpha=alpha)$root
+  return(1 - gamma(alp + 1)^2 / gamma(2*alp + 1))
+}
+V.DG <- function(delta, n.x, n.y) {
+  theta = pnorm(delta/sqrt(2))
+  Owen = T.Owen(delta/sqrt(2), 1/sqrt(3))
+  return(V = ((n.x + n.y - 1)*theta*(1-theta) - 2*(n.x + n.y -2) * Owen ) / (n.x * n.y))
+}
+DG.equation <- function(delta, AUC.hat, n.x, n.y, alpha) {
+  AUC = pnorm(delta/sqrt(2))
+  return(AUC + c(+1,-1)*qnorm(1-alpha/2) * sqrt(V.DG(delta, n.x, n.y)) - AUC.hat)
+}
+DG <- function(AUC.hat, n.x, n.y, alpha) {
+  delta <- multiroot(DG.equation, c(1, 3), AUC.hat=AUC.hat, n.x=n.x, n.y=n.y, alpha=alpha)$root
+  return(pnorm(delta/sqrt(2)))
+}
+S.stat <- function(x, y, n.x=length(x), n.y=length(y)) {
+  ranks = rank(c(x,y))
+  rank.x = ranks[1:n.x] ; rank.y = ranks[-1:-n.x]   # ranks within both x and y
+  rank.i = rank(rank.x) ; rank.j = rank(rank.y)     # ranks within each
+  S2.10 = ( sum((rank.x - rank.i)^2) - n.x*(mean(rank.x) - (n.x+1)/2)^2 ) / ((n.x-1)*n.y^2)
+  S2.01 = ( sum((rank.y - rank.j)^2) - n.y*(mean(rank.y) - (n.y+1)/2)^2 ) / ((n.y-1)*n.x^2)
+  return(S = sqrt((n.x * S2.01 + n.y * S2.10)/(n.x + n.y)))
+}
+V.DeLong <- function(x, y, n.x=length(x), n.y=length(y), A = AUC(x, y, n.x, n.y)) {
+  D2 <- D1 <- 0
+  for (i in 1:n.x) {D1 = D1 + ( sum(y > x[i]) / n.y - A )^2}; D1 = D1 /(n.x * (n.x - 1))
+  for (j in 1:n.y) {D2 = D2 + ( sum(y[j] > x) / n.x - A )^2}; D2 = D2 /(n.y * (n.y - 1))
+  return(V = D1 + D2)
+}
+
+AUCCI <- function(data, method, disease="disease", marker="marker", alpha=0.05, variance = FALSE, cc = FALSE) {
+  ### note for developers
+  ## method
+    # "HanleyMcNeilWald", "HanleyMcNeilExponential", "HanleyMcNeilScore", ...
+  ## variance: logical
+    # to show estimated variance also or not?
+  ## cc: logical
+    # continuity correction (for Wilson Score only)
+  
+  # basic stats
+  x = data[data[,disease]==0, marker]
+  y = data[data[,disease]==1, marker]
+  n.x = length(x) ; n.y = length(y) ; n = n.x + n.y
+  A = AUC(x, y, n.x, n.y)
+  
+  if (method == "HanleyMcNeilWald") {
+    Q = Q.stat(x, y, n.x, n.y); Q1 = Q$Q1; Q2 = Q$Q2
+    V = V.HM(A, n.x, n.y, Q1, Q2)
+    CI = CI.base(A,V,alpha)
+  } 
+  
+  else if (method == "HanleyMcNeilExponential") {
+    V = V.HM(A, n.x, n.y)
+    CI = CI.base(A,V,alpha)  
+  }
+  
+  else if (method == "HanleyMcNeilScore") {
+    CI = multiroot(HMS.equation, c(0.01,0.99), AUC.hat=A, n.x=n.x, n.y=n.y, alpha=alpha)$root
+    if (variance) {V = V.HM(A, n.x, n.y)}
+  }
+
+  else if (method == "NewcombeExponential") {
+    V = V.NC(A, n.x, n.y)
+    if (V < 0) { warning("Negative estimated variance set to zero")
+                 V = 0 }
+    CI = CI.base(A,V,alpha)  
+  }
+  
+  else if (method == "NewcombeScore") {
+    CI = multiroot(NC.equation, c(0.01,0.99), AUC.hat=A, n.x=n.x, n.y=n.y, alpha=alpha)$root
+    if (variance) {
+      V = V.NC(A, n.x, n.y)
+      if (V < 0) { warning("Negative estimated variance set to zero")
+                   V = 0 }      
+    }
+  }
+  
+  else if (method == "CortesMohri") {
+    V = V.CM(A, n.x, n.y)
+    CI = CI.base(A,V,alpha)
+  }
+  
+  else if (method == "ReiserGuttman") {
+    mu.x = mean(x); mu.y = mean(y)
+    sig.x = sd(x);  sig.y = sd(y); s2 = sig.x^2 + sig.y^2
+    d = (mu.y-mu.x)/sqrt(s2)
+    f = s2^2/((sig.x^4/(n.x-1))+(sig.y^4/(n.y-1)))
+    M = s2/((sig.x^2/n.x)+(sig.y^2/n.y))
+    V = 1/M + d^2/(2*f)
+    d.CI = d + c(-1,1)*qnorm(1-alpha/2)*sqrt(V)
+    CI = pnorm(d.CI)
+  }
+  
+  # V for CP???
+  else if (method == "ClopperPearson") {
+    n = n.x + n.y; k = round(A * n)
+    f1 = qf(alpha/2,2*k,2*(n-k+1))
+    f2 = qf(1-alpha/2,2*(k+1),2*(n-k))
+    ##  V = ??
+    CI = c( (k*f1)/(n-k+1+k*f1), ((k+1)*f2)/(n-k+(k+1)*f2) )
+  }
+  
+  else if (method == "Bamber") {
+    V = V.Bm(x, y, n.x, n.y, A)
+    CI = CI.base(A,V,alpha)
+  }
+  
+  else if (method == "WilsonScore") {
+    z.a2 = qnorm(1-alpha/2)
+    CI = (2*n*A + z.a2^2 +cc*c(-1,1) +c(-1,1)* z.a2* sqrt(z.a2^2 + cc*c(-2,2) - 1/n*cc + 4*A*(n*(1-A) +1*cc)))/(2*(n+z.a2^2))
+  }
+
+  else if (method == "HalperinMee") {
+    CI = Halperin(x, y, n.x, n.y, alpha)
+    if (variance) {
+      Halperin.stat = Halperin.stat(x, y, n.x, n.y)
+      AUC.hat = Halperin.stat$AUC.hat; N.J.hat = Halperin.stat$N.J.hat
+      V = AUC.hat*(1-AUC.hat)/N.J.hat
+    }
+  }
+  
+  # V for DB: TBD
+  else if (method == "DoubleBeta") {
+    CI = DB(A, n.x, n.y, alpha)
+  }
+  
+  # V for DG: TBD
+  else if (method == "DoubleGaussian") {
+    CI = DG(A, n.x, n.y, alpha)
+  }
+  
+  else if (method == "MannWhitney") {
+    V = S.stat(x, y, n.x, n.y)^2 * n / (n.x * n.y)
+    CI = CI.base(A,V,alpha)
+  }
+
+  else if (method == "MannWhitneyLT") {
+    V = S.stat(x, y, n.x, n.y)^2 * n / (n.x * n.y)
+    CI = CI.base(log(A/(1-A)), V/ (A*(1-A))^2, alpha)
+    CI = exp(CI) / (exp(CI) + 1)
+  }
+
+  else if (method == "DeLong") {
+    V = V.DeLong(x, y, n.x, n.y, A)
+    CI = CI.base(A,V,alpha)
+  }  
+
+  result = list(AUC.hat = A, CI = CI);  if (variance) {result$V.hat = V}
+  return(result)
+}
