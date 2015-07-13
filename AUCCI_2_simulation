@@ -1,0 +1,131 @@
+### AUCCI Part II. Generating samples
+
+## 0. Libraries  ######################################################################################################
+library(truncnorm)
+
+# 0.2.1 rbivariate
+rbivariate <- function(mu.x, sd.x, mu.y, sd.y, r=0.5, iter=100) {
+  z1 <- rnorm(iter)
+  z2 <- rnorm(iter)
+  x <- sqrt(1-r^2)*sd.x*z1 + r*sd.x*z2 + mu.x
+  y <- sd.y*z2 + mu.y
+  return(list(x,y))
+}
+
+# 0.2.2 truncated exponential / qtexp: qunatile, rtexp: random sample of t.exp
+# http://tolstoy.newcastle.edu.au/R/e10/help/10/06/8669.html
+qtexp <- function(x, beta, trunc) { -log(1-x*(1-exp(-trunc/beta)))*beta }
+rtexp <- function(n, beta, trunc) { qtexp(runif(n), beta, trunc) }
+
+
+
+## 1. Parameter Space Points  ######################################################################################################
+parm <- list()
+
+## 1.1 parm$theta (theta(=AUC), mu, sig, beta)
+parm$theta = data.frame(theta = c(0.6, 0.7, 0.8, 0.9, 0.95))
+parm$theta = within(parm$theta,
+{ # Under normal distribution
+  mu.x = 1; sig.x = 1; sig.y = 2
+  # Under exponential distribution
+  beta.x = 1
+  # Residual params under thetas
+  mu.y = mu.x + qnorm(theta)*sqrt(sig.x^2 + sig.y^2)
+  beta.y = theta * beta.x / (1-theta)
+  # bounds for trunction
+  a.x = mu.x - 3* sig.x; b.x = mu.x + 3*sig.x   # bounds for truncated noraml
+  a.y = mu.y - 3* sig.y; b.y = mu.y + 3*sig.y
+  c.x = qexp(0.99, 1/beta.x); c.y = qexp(0.99, 1/beta.y) # bounds for truncated exp  # correction: beta. -> 1/beta. (scale parameter)
+})
+
+## 1.2 parm$npi (n, pi)
+# n= sample size,  pi = prevalence rate     : dim(parm2) = 3*3=9
+# n.x and n.y (= n * pi) are assumed to be fixed, not random.
+parm$npi = data.frame(n = rep(c(30, 50, 200), each=3), pi = rep(c(0.30, 0.50, 0.70),3))
+
+## 1.3 alpha levels and other
+parm$alpha = data.frame(alpha = c(0.1, 0.05, 0.01), z.a2 = qnorm(1-c(0.1, 0.05, 0.01)/2))     # z_alpha/2
+parm$n.sim = data.frame(n.sim = 1:100)
+parm$method = data.frame(CI.methods = CI.methods, stringsAsFactors = F)
+parm$dim = sapply(parm,dim)[1,]       # dimension of each parameter
+## dimension => ref. to III.2.3 sample generation,  IV.eval's
+# 5(theta) x 9(n*pi) x 3(alpha) x (n.sim) x (CI.methods)
+
+
+## 2. Sample data  ##################################################################################################
+## 2.1 Bivariate-normal distribution
+{ temp.1 <- temp.2 <- sample.normal  <- list()   # inner/middle/outer shell
+  set.seed(10)
+  for (i in 1:parm$dim["theta"]) { # i: AUC
+    for (j in 1:parm$dim["npi"]) { # j: n sample size, pi prevalence rate
+      mu.x <- parm$theta$mu.x[i]; mu.y <- parm$theta$mu.y[i]; sig.x <- parm$theta$sig.x[i]; sig.y <- parm$theta$sig.y[i];
+      a.x <- parm$theta$a.x[i];   b.x <- parm$theta$b.x[i];   a.y <- parm$theta$a.y[i];     b.y <- parm$theta$b.y[i]
+      n <- parm$npi$n[j] ; pi <- parm$npi$pi[j]
+      n.y <- n*pi; n.x <- n - n.y
+      for (k in 1:parm$dim["n.sim"]){ # k: num of simulations(samples)
+        temp.1[[k]] <- data.frame(disease = c(rep(0,n.x), rep(1, n.y)),
+                                  marker  = c(rtruncnorm(n.x,a.x, b.x, mu.x, sig.x), rtruncnorm(n.y,a.y, b.y, mu.y, sig.y)))
+      }
+      temp.2[[j]] <- temp.1
+    }
+    sample.normal[[i]] <- temp.2
+  }
+}
+
+## 2.2 Bivariate-exponential distribution
+{ temp.1 <- temp.2 <- sample.exponential  <- list()   # inner/middle/outer shell
+  set.seed(10)
+  for (i in 1:parm$dim["theta"]) { # i: AUC
+    for (j in 1:parm$dim["npi"]) { # j: n sample size, pi prevalence rate
+      beta.x <- parm$theta$beta.x[i]; beta.y <- parm$theta$beta.y[i]; theta <- parm$theta$theta[i]
+      c.x <- parm$theta$c.x[i]; c.y <- parm$theta$c.y[i]
+      n <- parm$npi$n[j] ; pi <- parm$npi$pi[j]
+      n.y <- n*pi; n.x <- n - n.y
+      for (k in 1:parm$dim["n.sim"]){ # k: num of simulations(samples)
+        temp.1[[k]] <- temp <- data.frame(disease = c(rep(0,n.x), rep(1, n.y)),
+                                          marker  = c(rtexp(n-n*pi, beta.x, c.x), rtexp(n*pi,beta.y, c.y)))
+      }
+      temp.2[[j]] <- temp.1
+    }
+    sample.exponential[[i]] <- temp.2
+  }
+}
+
+
+## 2.3 generating a series of CI's
+# CI's for individual elements of a sample
+CI.i <- function(data, parm, alpha, variance = FALSE, cc = FALSE) {
+  CI.i = as.data.frame(matrix(NA,2,parm$dim["method"]+1))
+  names(CI.i) = c("AUC.hat", parm$method$CI.methods)
+  CI.i$AUC.hat = AUCCI(data, parm$method$CI.methods[1])$AUC.hat
+  for (i in 1:parm$dim["method"]) { CI.i[,i] = AUCCI(data, method = parm$method$CI.methods[i], alpha = alpha, variance = variance, cc = cc)$CI }  
+  return(CI.i)
+}
+
+# CI's for a whole sample
+CI.sim <- function(sim.data, parm) {
+  stat <- sim.data
+  for (i in 1:parm$dim["theta"]) { # i: AUC
+    for (j in 1:parm$dim["npi"]) { # j: n sample size, pi prevalence rate
+      theta <- parm$theta$theta[i]; n <- parm$npi$n[j] ; pi <- parm$npi$pi[j]
+      temp.1 <- temp.2 <- list()
+      for (p in 1:parm$dim["alpha"]) { # p: num of alpha levels
+        for (k in 1:parm$dim["n.sim"]){ # k: num of simulations(samples)
+          temp.1[[k]] <- CI.i(sim.data[[i]][[j]][[k]], parm, alpha=parm$alpha$alpha[p], variance=FALSE, cc=FALSE)
+          temp.1[[k]]$AUC <- theta
+          temp.1[[k]]$n.x <- n.x
+          temp.1[[k]]$n.y <- n.y
+          temp.1[[k]]$alpha <- parm$alpha$alpha[p]
+        }
+        temp.2[[p]] <- temp.1
+      }
+      stat[[i]][[j]] <- temp.2      
+    }
+  }
+  return(stat)
+}
+
+# running
+stat.normal <- CI.sim(sample.normal, parm)
+stat.exponential <- CI.sim(sample.exponential, parm)
+
